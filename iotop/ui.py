@@ -760,7 +760,7 @@ def main():
                       default=False, help=optparse.SUPPRESS_HELP)
     parser.add_option('--no-help', action='store_false', dest='help', default=True,
                       help='suppress listing of shortcuts')
-    parser.add_option('-m', '--prometheus', action='store_true', dest='prometheus',
+    parser.add_option('-m', '--prometheus', action='store_true', dest='prometheus', default=False,
                       help='print lines in prometheus metrics style fashion (implies --batch -qqq --time=false --accumulated --iter=None)')
     parser.add_option('--prometheus-filename', type='str', dest='prometheus_filename', metavar='FILENAME', default="/tmp/node_iotop.prom",
                       help='filename to save prometheus metrics in (to be exposed by node_exporter) [/tmp/node_iotop.prom]')
