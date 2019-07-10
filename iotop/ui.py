@@ -71,6 +71,8 @@ def human_size(size):
 
 
 def format_size(options, bytes):
+    if options.prometheus:
+        return '%.0f' % (bytes)
     if options.kilobytes:
         return '%.2f K' % (bytes / 1024.0)
     return human_size(bytes)
@@ -418,7 +420,7 @@ class IOTopUI(object):
         action()
 
     def get_data(self):
-        def format(p):
+        def format(p, type=None):
             stats = format_stats(self.options, p, self.process_list.duration)
             io_delay, swapin_delay, read_bytes, write_bytes = stats
             if Stats.has_blkio_delay_total:
@@ -426,19 +428,26 @@ class IOTopUI(object):
             else:
                 delay_stats = ' ?unavailable?  '
             pid_format = '%%%dd' % MAX_PID_WIDTH
-            line = (pid_format + ' %4s %-8s %11s %11s %s') % (
-                p.pid, p.get_ioprio(), p.get_user()[:8], read_bytes,
-                write_bytes, delay_stats)
-            cmdline = p.get_cmdline()
-            if not self.options.batch:
-                remaining_length = self.width - len(line)
-                if 2 < remaining_length < len(cmdline):
-                    len1 = (remaining_length - 1) // 2
-                    offset2 = -(remaining_length - len1 - 1)
-                    cmdline = cmdline[:len1] + '~' + cmdline[offset2:]
-            line += cmdline
-            if not self.options.batch:
-                line = line[:self.width]
+            if self.options.prometheus:
+                metrics_prefix = "%s_%s" % (self.options.prometheus_namespace, self.options.prometheus_subsystem)
+                if type == "reads":
+                    line = ('%s_reads_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], p.get_cmdline(), read_bytes)
+                else:
+                    line = ('%s_writes_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], p.get_cmdline(), write_bytes)
+            else:
+                line = (pid_format + ' %4s %-8s %11s %11s %s') % (
+                    p.pid, p.get_ioprio(), p.get_user()[:8], read_bytes,
+                    write_bytes, delay_stats)
+                cmdline = p.get_cmdline()
+                if not self.options.batch:
+                    remaining_length = self.width - len(line)
+                    if 2 < remaining_length < len(cmdline):
+                        len1 = (remaining_length - 1) // 2
+                        offset2 = -(remaining_length - len1 - 1)
+                        cmdline = cmdline[:len1] + '~' + cmdline[offset2:]
+                line += cmdline
+                if not self.options.batch:
+                    line = line[:self.width]
             return line
 
         def should_format(p):
@@ -454,7 +463,25 @@ class IOTopUI(object):
             stats_lambda = lambda p: p.stats_delta
         processes.sort(key=lambda p: key(p, stats_lambda(p)),
                        reverse=self.sorting_reverse)
-        return list(map(format, processes))
+
+        if self.options.prometheus:
+            metrics_prefix = "%s_%s" % (self.options.prometheus_namespace, self.options.prometheus_subsystem)
+
+            metrics_reads_name = "%s_reads_bytes_total" % (metrics_prefix)
+            metrics_header_reads = [
+                "# HELP %s %s" % (metrics_reads_name, "The total number of bytes read by a process or thread"),
+                "# TYPE %s counter" % (metrics_reads_name)
+            ]
+
+            metrics_writes_name = "%s_writes_bytes_total" % (metrics_prefix)
+            metrics_header_writes = [
+                "# HELP %s %s" % (metrics_writes_name, "The total number of bytes written by a process or thread"),
+                "# TYPE %s counter" % (metrics_writes_name)
+            ]
+
+            return metrics_header_reads + [format(p, "reads") for p in processes] + metrics_header_writes + [format(p, "writes") for p in processes]
+        else:
+            return list(map(format, processes))
 
     def refresh_display(self, first_time, total, current, duration):
         summary = [
@@ -485,9 +512,17 @@ class IOTopUI(object):
                     print(s)
                 if self.options.quiet <= int(first_time):
                     print(''.join(titles))
-            for l in lines:
-                print(l)
-            sys.stdout.flush()
+
+            if self.options.prometheus:
+                print("Writing metrics to file %s" % self.options.prometheus_filename)
+                with open(self.options.prometheus_filename + '_tmp', 'w') as f:
+                    for l in lines:
+                        f.write('%s\n' % l)
+                os.rename(self.options.prometheus_filename + '_tmp', self.options.prometheus_filename)
+            else:
+                for l in lines:
+                    print(l)
+                sys.stdout.flush()
         else:
             self.win.erase()
 
@@ -725,13 +760,29 @@ def main():
                       default=False, help=optparse.SUPPRESS_HELP)
     parser.add_option('--no-help', action='store_false', dest='help', default=True,
                       help='suppress listing of shortcuts')
+    parser.add_option('-m', '--prometheus', action='store_true', dest='prometheus',
+                      help='print lines in prometheus metrics style fashion (implies --batch -qqq --time=false --accumulated --iter=None)')
+    parser.add_option('--prometheus-filename', type='str', dest='prometheus_filename', metavar='FILENAME', default="/tmp/node_iotop.prom",
+                      help='filename to save prometheus metrics in (to be exposed by node_exporter) [/tmp/node_iotop.prom]')
+    parser.add_option('--prometheus-namespace', type='str', dest='prometheus_namespace', metavar='NAMESPACE', default="node",
+                      help='namespace for prometheus metrics [node]')
+    parser.add_option('--prometheus-subsystem', type='str', dest='prometheus_subsystem', metavar='SUBSYSTEM', default="iotop",
+                      help='subsystem name for prometheus metrics [iotop]')
+
 
     options, args = parser.parse_args()
     if args:
         parser.error('Unexpected arguments: ' + ' '.join(args))
     find_uids(options)
     options.pids = options.pids or []
-    options.batch = options.batch or options.time or options.quiet
+    options.batch = options.batch or options.time or options.quiet or options.prometheus
+    options.kilobytes = options.kilobytes or options.prometheus
+    options.accumulated = options.accumulated or options.prometheus
+
+    if options.prometheus:
+        options.quiet = 3
+        options.iterations = None
+        options.time = False
 
     main_loop = lambda: run_iotop(options)
 
