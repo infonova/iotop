@@ -20,6 +20,10 @@ really want to install this version of iotop on your system, do (as root):
 # ./setup.py install
 
 
--- 
+To run in docker do something like:
+
+# docker run -it --rm --net host --pid host --cap-add NET_ADMIN infonova/iotop:0.6
+
+--
 Guillaume Chazarain <guichaz@gmail.com>
 http://guichaz.free.fr/iotop
