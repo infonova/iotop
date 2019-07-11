@@ -29,6 +29,7 @@ import select
 import signal
 import sys
 import time
+import re
 
 # Try to ensure time.monotonic() is available.
 # This normally requires Python 3.3 or later.
@@ -420,6 +421,19 @@ class IOTopUI(object):
         action()
 
     def get_data(self):
+        def escape_character(m):
+            c = m.group(1)
+            if c == "\\":
+                return "\\\\"
+            elif c == "\"":
+                return "\\\""
+            elif c == "\n":
+                return " "
+            return c
+
+        def escape_value(value):
+            return re.sub(r"([\n\"\\])", escape_character, value)
+
         def format(p, type=None):
             stats = format_stats(self.options, p, self.process_list.duration)
             io_delay, swapin_delay, read_bytes, write_bytes = stats
@@ -430,10 +444,13 @@ class IOTopUI(object):
             pid_format = '%%%dd' % MAX_PID_WIDTH
             if self.options.prometheus:
                 metrics_prefix = "%s_%s" % (self.options.prometheus_namespace, self.options.prometheus_subsystem)
+
+                escaped_cmdline = escape_value(p.get_cmdline()).strip()
+
                 if type == "reads":
-                    line = ('%s_reads_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], p.get_cmdline(), read_bytes)
+                    line = ('%s_reads_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], escaped_cmdline, read_bytes)
                 else:
-                    line = ('%s_writes_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], p.get_cmdline(), write_bytes)
+                    line = ('%s_writes_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], escaped_cmdline, write_bytes)
             else:
                 line = (pid_format + ' %4s %-8s %11s %11s %s') % (
                     p.pid, p.get_ioprio(), p.get_user()[:8], read_bytes,
