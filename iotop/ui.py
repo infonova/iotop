@@ -30,6 +30,7 @@ import signal
 import sys
 import time
 import re
+from prometheus_client import CollectorRegistry, Counter, write_to_textfile
 
 # Try to ensure time.monotonic() is available.
 # This normally requires Python 3.3 or later.
@@ -80,7 +81,10 @@ def format_size(options, bytes):
 
 
 def format_bandwidth(options, size, duration):
-    return format_size(options, size and float(size) / duration) + '/s'
+    if options.prometheus:
+        return format_size(options, size and float(size))
+    else:
+        return format_size(options, size and float(size) / duration) + '/s'
 
 
 def format_stats(options, process, duration):
@@ -88,7 +92,7 @@ def format_stats(options, process, duration):
     # IOTopUI.get_data(self)
     def delay2percent(delay):  # delay in ns, duration in s
         return '%.2f %%' % min(99.99, delay / (duration * 10000000.0))
-    if options.accumulated:
+    if options.accumulated and not options.prometheus:
         stats = process.stats_accum
         display_format = lambda size, duration: format_size(options, size)
         duration = time.monotonic() - process.stats_accum_timestamp
@@ -103,7 +107,6 @@ def format_stats(options, process, duration):
     written_bytes = max(0, written_bytes)
     write_bytes = display_format(written_bytes, duration)
     return io_delay, swapin_delay, read_bytes, write_bytes
-
 
 def get_max_pid_width():
     try:
@@ -161,6 +164,15 @@ class IOTopUI(object):
     ]
 
     def __init__(self, win, process_list, options):
+
+        if options.prometheus:
+            self.prom_metrics_prefix = '%s_%s' % (options.prometheus_namespace, options.prometheus_subsystem)
+            self.prom_registry = CollectorRegistry()
+            #self.prom_write_bytes_total = Counter('%s_writes_bytes_total' % self.prom_metrics_prefix, 'The total number of bytes written by a process or thread', ['pid', 'user', 'cmd'], registry=self.prom_registry)
+            #self.prom_read_bytes_total = Counter('%s_reads_bytes_total' % self.prom_metrics_prefix, 'The total number of bytes read by a process or thread', ['pid', 'user', 'cmd'], registry=self.prom_registry)
+            self.prom_read_bytes_total = Counter('%s_read_bytes_total' % self.prom_metrics_prefix, 'The total number of bytes read by a process group', ['process_group'], registry=self.prom_registry)
+            self.prom_write_bytes_total = Counter('%s_write_bytes_total' % self.prom_metrics_prefix, 'The total number of bytes written by a process group', ['process_group'], registry=self.prom_registry)
+
         self.process_list = process_list
         self.options = options
         self.sorting_key = 6
@@ -434,23 +446,61 @@ class IOTopUI(object):
         def escape_value(value):
             return re.sub(r"([\n\"\\])", escape_character, value)
 
-        def format(p, type=None):
+        def format(p):
+
+            def determine_process_group(cmdline):
+                #
+                # TODO: Make config file which looks something like this:
+                # # file iotop-config.yml
+                # process_groups:
+                #   default_group: "Others"
+                #   - name: "Zuul"
+                #     pattern: "..."
+                #   - name: "Artifactory"
+                #     pattern: "..."
+                #
+                process_groups = [
+                  { "name": "Kernel", "pattern": "^\[.+$" },
+                  { "name": "Zuul", "pattern": ".*(zuul|nodepool|git).*" },
+                  { "name": "Artifactory", "pattern": ".*(artifactory|nginx).*" },
+                  { "name": "Elastic", "pattern": ".*elasticsearch.*" },
+                ]
+                #process_groups = [
+                #  { "name": "Docker", "pattern": ".*docker.*" },
+                #  { "name": "Iotop", "pattern": ".*iotop.*" },
+                #  { "name": "Kernel", "pattern": "^\[.+$" }
+                #]
+
+                for process_group in process_groups:
+                    if re.match(process_group["pattern"], cmdline):
+                      return process_group["name"]
+
+                return "Others"
+
             stats = format_stats(self.options, p, self.process_list.duration)
             io_delay, swapin_delay, read_bytes, write_bytes = stats
+
             if Stats.has_blkio_delay_total:
                 delay_stats = '%7s %7s ' % (swapin_delay, io_delay)
             else:
                 delay_stats = ' ?unavailable?  '
             pid_format = '%%%dd' % MAX_PID_WIDTH
             if self.options.prometheus:
-                metrics_prefix = "%s_%s" % (self.options.prometheus_namespace, self.options.prometheus_subsystem)
+                #escaped_cmdline = escape_value(p.get_cmdline()).strip()
+                process_group = determine_process_group(p.get_cmdline())
 
-                escaped_cmdline = escape_value(p.get_cmdline()).strip()
+                read_bytes_float = float(read_bytes)
+                write_bytes_float = float(write_bytes)
 
-                if type == "reads":
-                    line = ('%s_reads_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], escaped_cmdline, read_bytes)
-                else:
-                    line = ('%s_writes_bytes_total{pid="%d", user="%s", cmd="%s"} %s') % (metrics_prefix, p.pid, p.get_user()[:8], escaped_cmdline, write_bytes)
+                if (read_bytes_float > 0.0):
+                    self.prom_read_bytes_total.labels(process_group=process_group).inc(read_bytes_float)
+                    #self.prom_read_bytes_total.labels(pid=p.pid,user=p.get_user()[:8],cmd=escaped_cmdline).inc(read_bytes_float)
+
+                if (write_bytes_float > 0.0):
+                    self.prom_write_bytes_total.labels(process_group=process_group).inc(write_bytes_float)
+                    #self.prom_write_bytes_total.labels(pid=p.pid,user=p.get_user()[:8],cmd=escaped_cmdline).inc(write_bytes_float)
+
+                line = ""
             else:
                 line = (pid_format + ' %4s %-8s %11s %11s %s') % (
                     p.pid, p.get_ioprio(), p.get_user()[:8], read_bytes,
@@ -482,21 +532,9 @@ class IOTopUI(object):
                        reverse=self.sorting_reverse)
 
         if self.options.prometheus:
-            metrics_prefix = "%s_%s" % (self.options.prometheus_namespace, self.options.prometheus_subsystem)
-
-            metrics_reads_name = "%s_reads_bytes_total" % (metrics_prefix)
-            metrics_header_reads = [
-                "# HELP %s %s" % (metrics_reads_name, "The total number of bytes read by a process or thread"),
-                "# TYPE %s counter" % (metrics_reads_name)
-            ]
-
-            metrics_writes_name = "%s_writes_bytes_total" % (metrics_prefix)
-            metrics_header_writes = [
-                "# HELP %s %s" % (metrics_writes_name, "The total number of bytes written by a process or thread"),
-                "# TYPE %s counter" % (metrics_writes_name)
-            ]
-
-            return metrics_header_reads + [format(p, "reads") for p in processes] + metrics_header_writes + [format(p, "writes") for p in processes]
+            for p in processes:
+                format(p)
+            return list()
         else:
             return list(map(format, processes))
 
@@ -532,10 +570,7 @@ class IOTopUI(object):
 
             if self.options.prometheus:
                 print("Writing metrics to file %s" % self.options.prometheus_filename)
-                with open(self.options.prometheus_filename + '_tmp', 'w') as f:
-                    for l in lines:
-                        f.write('%s\n' % l)
-                os.rename(self.options.prometheus_filename + '_tmp', self.options.prometheus_filename)
+                write_to_textfile(self.options.prometheus_filename, self.prom_registry)
             else:
                 for l in lines:
                     print(l)
