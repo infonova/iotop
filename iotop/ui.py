@@ -185,8 +185,8 @@ class IOTopUI(object):
                 pid_list = ['process_group']
                 description = 'The total number of bytes {} by a process group'
 
-            self.prom_read_bytes_total = Counter('%s_reads_bytes_total' % self.prom_metrics_prefix, description.format('read'), pid_list, registry=self.prom_registry)
-            self.prom_write_bytes_total = Counter('%s_writes_bytes_total' % self.prom_metrics_prefix, description.format('written'), pid_list, registry=self.prom_registry)
+            self.prom_read_bytes_total = Counter('%s_read_bytes_total' % self.prom_metrics_prefix, description.format('read'), pid_list, registry=self.prom_registry)
+            self.prom_write_bytes_total = Counter('%s_write_bytes_total' % self.prom_metrics_prefix, description.format('written'), pid_list, registry=self.prom_registry)
 
         self.process_list = process_list
         self.options = options
