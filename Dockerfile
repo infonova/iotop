@@ -9,7 +9,7 @@ RUN ./setup.py install
 FROM alpine:3.10
 
 RUN apk --update --no-cache add python3 && \
-    pip3 install prometheus_client
+    pip3 install prometheus_client pyyaml
 
 COPY --from=builder /usr/sbin/iotop /usr/sbin/iotop
 COPY --from=builder /usr/lib/python3.7/site-packages/iotop /usr/lib/python3.7/site-packages/iotop

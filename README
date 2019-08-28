@@ -24,6 +24,25 @@ To run in docker do something like:
 
 # docker run -it --rm --net host --pid host --cap-add NET_ADMIN infonova/iotop:0.6
 
+To group processes a configuration yaml configuration file has to be located
+here: /etc/iotop-config.yml
+The groups are defined in the process_groups with a name and a filter pattern.
+Everything that is not defined there is added to a group with the  default_process_group
+name.
+
+    Example configuration file:
+
+    default_process_group: "Others"
+    process_groups:
+      - name: "Kernel"
+        pattern: "^\\[.+$"
+      - name: "Zuul"
+        pattern: ".*(zuul|nodepool|git).*"
+      - name: "Artifactory"
+        pattern: ".*(artifactory|nginx).*"
+      - name: "Elastic"
+        pattern: ".*elasticsearch.*"
+
 --
 Guillaume Chazarain <guichaz@gmail.com>
 http://guichaz.free.fr/iotop
