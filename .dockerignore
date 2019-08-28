@@ -1,0 +1,10 @@
+Dockerfile
+NEWS
+COPYING
+README
+THANKS
+build/
+.gitignore
+.git/
+.history/
+.vscode/

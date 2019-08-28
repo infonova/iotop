@@ -1,18 +1,22 @@
+# temp builder image
 FROM alpine:3.10 as builder
 
-RUN apk --update --no-cache add python3
-
 WORKDIR /work
-COPY . /work
-RUN ./setup.py install
 
+RUN apk --update --no-cache add python3
+RUN pip3 --disable-pip-version-check --no-cache-dir install pipenv
+
+COPY . /work
+
+RUN pipenv lock --requirements > requirements.txt && \
+    pip3 install -r requirements.txt --install-option="--prefix=/install"
+
+RUN ./setup.py install --prefix=/install
+
+# final image
 FROM alpine:3.10
 
-RUN apk --update --no-cache add python3 && \
-    pip3 install prometheus_client pyyaml
-
-COPY --from=builder /usr/sbin/iotop /usr/sbin/iotop
-COPY --from=builder /usr/lib/python3.7/site-packages/iotop /usr/lib/python3.7/site-packages/iotop
-COPY --from=builder /usr/lib/python3.7/site-packages/iotop-0.6-py3.7.egg-info /usr/lib/python3.6/site-packages/iotop-0.6-py3.7.egg-info
+RUN apk --update --no-cache add python3
+COPY --from=builder /install /usr
 
 ENTRYPOINT ["/usr/sbin/iotop"]
