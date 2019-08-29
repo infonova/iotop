@@ -24,8 +24,7 @@ To run in docker do something like:
 
 # docker run -it --rm --net host --pid host --cap-add NET_ADMIN infonova/iotop:0.6
 
-To group processes a configuration yaml configuration file has to be located
-here: /etc/iotop-config.yml
+To group processes a configuration yaml configuration file can be defined with the --config parameter.
 The groups are defined in the process_groups with a name and a filter pattern.
 Everything that is not defined there is added to a group with the  default_process_group
 name.
