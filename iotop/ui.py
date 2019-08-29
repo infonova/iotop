@@ -164,15 +164,12 @@ class IOTopUI(object):
         (lambda p, s: p.get_cmdline(), False),
     ]
 
-
-    def load_iotop_configuration():
-        if os.path.isfile("/etc/iotop-config.yml"):
-            return yaml.safe_load(open("etc/iotop-config.yml", "r"))
-        return None
-
-    iotop_configuration = load_iotop_configuration()
+    iotop_configuration = None
 
     def __init__(self, win, process_list, options):
+
+        if options.iotop_configuration and os.path.isfile(options.iotop_configuration):
+            self.iotop_configuration = yaml.safe_load(open(options.iotop_configuration, "r"))
 
         if options.prometheus:
             self.prom_metrics_prefix = '%s_%s' % (options.prometheus_namespace, options.prometheus_subsystem)
@@ -816,6 +813,8 @@ def main():
                       help='namespace for prometheus metrics [node]')
     parser.add_option('--prometheus-subsystem', type='str', dest='prometheus_subsystem', metavar='SUBSYSTEM', default="iotop",
                       help='subsystem name for prometheus metrics [iotop]')
+    parser.add_option('--config', type='str', dest='iotop_configuration', metavar='FILEPATH', default="/etc/iotop-config.yml",
+                      help='define path to the configuration yml file')
 
 
     options, args = parser.parse_args()
